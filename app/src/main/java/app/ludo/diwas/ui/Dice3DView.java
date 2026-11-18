@@ -21,10 +21,11 @@ import java.util.Arrays;
 import java.util.Random;
 
 /**
- * Hardware-accelerated 60fps 3D tumbling dice view.
- * Pops upward above the dice tray during a roll, rotates across all 3 axes with
- * perspective-foreshortened faces & pips, and lands smoothly on the exact rolled
- * value (1-6) with a subtle bounce settle.
+ * Glossy molded 3D tumbling dice view modeled on classic Ludo King physics:
+ * - Soft rounded molded 3D cube with gradient face shading (no harsh wireframe borders)
+ * - Large bold concave-style black pips foreshortened accurately in 3D
+ * - Chunky upward pop-and-tumble right above the dice tray, settling smoothly
+ *   into a glossy rounded die face matching the exact rolled value (1-6).
  */
 public class Dice3DView extends View {
 
@@ -43,7 +44,6 @@ public class Dice3DView extends View {
             {-1f,  1f, -1f}  // 7
     };
 
-    // Each face: {value, v0, v1, v2, v3} ordered counter-clockwise when viewed from outside
     private static final int[][] FACES = {
             {1, 0, 1, 2, 3}, // +Z Front
             {6, 5, 4, 7, 6}, // -Z Back
@@ -54,19 +54,20 @@ public class Dice3DView extends View {
     };
 
     private static final float[][][] PIP_COORDS = {
-            {}, // unused 0
+            {}, // 0
             {{0f, 0f}}, // 1
-            {{-0.48f, -0.48f}, {0.48f, 0.48f}}, // 2
-            {{-0.50f, -0.50f}, {0f, 0f}, {0.50f, 0.50f}}, // 3
-            {{-0.48f, -0.48f}, {0.48f, -0.48f}, {-0.48f, 0.48f}, {0.48f, 0.48f}}, // 4
-            {{-0.50f, -0.50f}, {0.50f, -0.50f}, {0f, 0f}, {-0.50f, 0.50f}, {0.50f, 0.50f}}, // 5
-            {{-0.48f, -0.52f}, {0.48f, -0.52f}, {-0.48f, 0f}, {0.48f, 0f}, {-0.48f, 0.52f}, {0.48f, 0.52f}} // 6
+            {{-0.47f, -0.47f}, {0.47f, 0.47f}}, // 2
+            {{-0.48f, -0.48f}, {0f, 0f}, {0.48f, 0.48f}}, // 3
+            {{-0.46f, -0.46f}, {0.46f, -0.46f}, {-0.46f, 0.46f}, {0.46f, 0.46f}}, // 4
+            {{-0.48f, -0.48f}, {0.48f, -0.48f}, {0f, 0f}, {-0.48f, 0.48f}, {0.48f, 0.48f}}, // 5
+            {{-0.46f, -0.52f}, {0.46f, -0.52f}, {-0.46f, 0f}, {0.46f, 0f}, {-0.46f, 0.52f}, {0.46f, 0.52f}} // 6
     };
 
+    private final Paint silhouettePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint faceFillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint faceBorderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint faceSeamPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint pipPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint pipHighlightPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint sheenPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint shadowPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint idleFillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint idleRimPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -74,6 +75,7 @@ public class Dice3DView extends View {
     private final Path facePath = new Path();
     private final Path pipPath = new Path();
     private final RectF idleRect = new RectF();
+    private final RectF sheenRect = new RectF();
     private final RectF shadowRect = new RectF();
     private final Random random = new Random();
 
@@ -86,8 +88,8 @@ public class Dice3DView extends View {
     private float rotX = 0f;
     private float rotY = 0f;
     private float rotZ = 0f;
-    private float jumpProgress = 0f;   // 0..1 lift above tray
-    private float scaleBoost = 1f;     // dynamic scale during jump & settle bounce
+    private float jumpProgress = 0f;
+    private float scaleBoost = 1f;
     private ValueAnimator rollAnimator;
     private ValueAnimator settleAnimator;
 
@@ -116,23 +118,29 @@ public class Dice3DView extends View {
     private void init() {
         setLayerType(LAYER_TYPE_HARDWARE, null);
 
+        // Soft molded outer cushion gives chunky rounded 3D plastic edges
+        silhouettePaint.setStyle(Paint.Style.FILL_AND_STROKE);
+        silhouettePaint.setStrokeJoin(Paint.Join.ROUND);
+        silhouettePaint.setStrokeCap(Paint.Cap.ROUND);
+        silhouettePaint.setColor(Color.rgb(156, 162, 174));
+
         faceFillPaint.setStyle(Paint.Style.FILL);
-        faceBorderPaint.setStyle(Paint.Style.STROKE);
-        faceBorderPaint.setStrokeJoin(Paint.Join.ROUND);
-        faceBorderPaint.setStrokeCap(Paint.Cap.ROUND);
-        faceBorderPaint.setColor(Color.rgb(92, 98, 112));
+
+        // Very subtle soft bevel edge instead of harsh dark outline
+        faceSeamPaint.setStyle(Paint.Style.STROKE);
+        faceSeamPaint.setStrokeJoin(Paint.Join.ROUND);
+        faceSeamPaint.setStrokeCap(Paint.Cap.ROUND);
+        faceSeamPaint.setColor(Color.argb(65, 110, 118, 132));
 
         pipPaint.setStyle(Paint.Style.FILL);
-        pipPaint.setColor(Color.rgb(24, 26, 32));
+        pipPaint.setColor(Color.rgb(20, 22, 26));
 
-        pipHighlightPaint.setStyle(Paint.Style.FILL);
-        pipHighlightPaint.setColor(Color.argb(65, 255, 255, 255));
-
+        sheenPaint.setStyle(Paint.Style.FILL);
         shadowPaint.setStyle(Paint.Style.FILL);
 
         idleFillPaint.setStyle(Paint.Style.FILL);
         idleRimPaint.setStyle(Paint.Style.STROKE);
-        idleRimPaint.setColor(Color.rgb(120, 125, 138));
+        idleRimPaint.setColor(Color.rgb(138, 144, 156));
 
         for (int i = 0; i < 6; i++) {
             drawItems[i] = new FaceDrawItem();
@@ -165,31 +173,30 @@ public class Dice3DView extends View {
         final int clamped = Math.max(1, Math.min(6, targetValue));
         final float[] endAngles = getTargetAnglesForValue(clamped);
 
-        // Multi-axis 3D spins (2 to 3 full revolutions) ending cleanly on target face
         final int spinsX = (random.nextBoolean() ? 1 : -1) * (2 + random.nextInt(2));
         final int spinsY = (random.nextBoolean() ? 1 : -1) * (2 + random.nextInt(2));
-        final int spinsZ = (random.nextBoolean() ? 1 : -1) * (1 + random.nextInt(2));
+        final int spinsZ = (random.nextBoolean() ? 1 : -1) * 1;
 
-        final float startX = endAngles[0] + (float) (spinsX * Math.PI * 2.0) + 0.55f;
-        final float startY = endAngles[1] + (float) (spinsY * Math.PI * 2.0) - 0.45f;
+        final float startX = endAngles[0] + (float) (spinsX * Math.PI * 2.0) + 0.60f;
+        final float startY = endAngles[1] + (float) (spinsY * Math.PI * 2.0) - 0.50f;
         final float startZ = (float) (spinsZ * Math.PI * 2.0);
 
         rolling = true;
         currentValue = clamped;
 
         rollAnimator = ValueAnimator.ofFloat(0f, 1f);
-        rollAnimator.setDuration(420L);
-        rollAnimator.setInterpolator(new DecelerateInterpolator(1.35f));
+        rollAnimator.setDuration(380L);
+        rollAnimator.setInterpolator(new DecelerateInterpolator(1.30f));
         rollAnimator.addUpdateListener(anim -> {
             float t = (float) anim.getAnimatedValue();
             rotX = startX + (endAngles[0] - startX) * t;
             rotY = startY + (endAngles[1] - startY) * t;
             rotZ = startZ * (1f - t);
 
-            // Parabolic lift up above the dice tray during the tumble
             float arc = (float) Math.sin(Math.PI * t);
             jumpProgress = arc;
-            scaleBoost = 1f + 0.30f * arc;
+            // Big chunky pop matching Ludo King 3D dice jump
+            scaleBoost = 1.06f + 0.38f * arc;
             invalidate();
         });
         rollAnimator.addListener(new AnimatorListenerAdapter() {
@@ -219,13 +226,12 @@ public class Dice3DView extends View {
 
     private void playSettleBounce() {
         settleAnimator = ValueAnimator.ofFloat(0f, 1f);
-        settleAnimator.setDuration(140L);
+        settleAnimator.setDuration(130L);
         settleAnimator.addUpdateListener(a -> {
             float t = (float) a.getAnimatedValue();
-            // Quick crisp landing bounce: 1.10 -> 0.96 -> 1.00
             if (t < 0.45f) {
                 float p = t / 0.45f;
-                scaleBoost = 1.10f - 0.14f * p;
+                scaleBoost = 1.12f - 0.16f * p;
             } else {
                 float p = (t - 0.45f) / 0.55f;
                 scaleBoost = 0.96f + 0.04f * p;
@@ -277,9 +283,8 @@ public class Dice3DView extends View {
         int h = getHeight();
         if (w <= 0 || h <= 0) return;
 
-        // Tray anchor sits centered vertically in the lower 62dp dice pad; upper space allows 3D jump
         float density = getResources().getDisplayMetrics().density;
-        float traySize = Math.min(w * 0.64f, 48f * density);
+        float traySize = Math.min(w * 0.66f, 50f * density);
         float cx = w * 0.5f;
         float baseCy = h - 31f * density;
 
@@ -292,74 +297,86 @@ public class Dice3DView extends View {
 
     private void drawSettledDie(Canvas canvas, float cx, float cy, float size) {
         float half = size * 0.5f;
-        float radius = size * 0.22f;
+        float radius = size * 0.27f;
 
-        // Subtle tray drop shadow
-        shadowRect.set(cx - half * 0.88f, cy + half * 0.78f, cx + half * 0.88f, cy + half * 1.06f);
-        shadowPaint.setColor(Color.argb(60, 0, 0, 0));
+        // Soft drop shadow inside the dice tray
+        shadowRect.set(cx - half * 0.90f, cy + half * 0.72f, cx + half * 0.90f, cy + half * 1.06f);
+        shadowPaint.setColor(Color.argb(65, 25, 25, 35));
         canvas.drawOval(shadowRect, shadowPaint);
 
         idleRect.set(cx - half, cy - half, cx + half, cy + half);
 
-        // Soft glossy ivory-to-silver gradient matching classic Ludo King flat die face
+        // Pillowy glossy 3D shaded white die body matching classic Ludo King settled die
         idleFillPaint.setShader(new LinearGradient(
                 idleRect.left, idleRect.top,
-                idleRect.right, idleRect.bottom,
-                new int[]{Color.WHITE, Color.rgb(245, 246, 250), Color.rgb(212, 217, 226)},
-                new float[]{0f, 0.62f, 1f},
+                idleRect.right * 0.25f + idleRect.left * 0.75f, idleRect.bottom,
+                new int[]{
+                        Color.rgb(255, 255, 255),
+                        Color.rgb(246, 247, 250),
+                        Color.rgb(220, 224, 232),
+                        Color.rgb(186, 192, 204)
+                },
+                new float[]{0f, 0.42f, 0.78f, 1f},
                 Shader.TileMode.CLAMP
         ));
         canvas.drawRoundRect(idleRect, radius, radius, idleFillPaint);
         idleFillPaint.setShader(null);
 
-        // Crisp bevel border
-        idleRimPaint.setStrokeWidth(Math.max(1.5f, size * 0.045f));
+        // Inner bright top gloss cap
+        float inset = size * 0.08f;
+        sheenRect.set(idleRect.left + inset, idleRect.top + inset * 0.8f,
+                idleRect.right - inset, idleRect.top + size * 0.40f);
+        sheenPaint.setShader(new LinearGradient(
+                sheenRect.left, sheenRect.top,
+                sheenRect.left, sheenRect.bottom,
+                Color.argb(175, 255, 255, 255),
+                Color.argb(0, 255, 255, 255),
+                Shader.TileMode.CLAMP
+        ));
+        canvas.drawRoundRect(sheenRect, radius * 0.75f, radius * 0.75f, sheenPaint);
+        sheenPaint.setShader(null);
+
+        // Soft bevel outer border
+        idleRimPaint.setStrokeWidth(Math.max(1.2f, size * 0.032f));
         canvas.drawRoundRect(idleRect, radius, radius, idleRimPaint);
 
-        // Inner top highlight sheen
-        float inset = size * 0.06f;
-        RectF sheen = new RectF(idleRect.left + inset, idleRect.top + inset,
-                idleRect.right - inset, idleRect.top + size * 0.34f);
-        pipHighlightPaint.setColor(Color.argb(120, 255, 255, 255));
-        canvas.drawRoundRect(sheen, radius * 0.7f, radius * 0.7f, pipHighlightPaint);
-
-        // Crisp pips for currentValue
-        float pipRadius = size * 0.098f;
-        float spread = half * 0.94f;
+        // Bold large black pips matching the reference video
+        float pipRadius = size * 0.122f;
+        float spread = half * 0.90f;
         float[][] pips = PIP_COORDS[currentValue];
-        pipPaint.setColor(currentValue == 1 ? Color.rgb(28, 30, 36) : Color.rgb(24, 26, 32));
+        pipPaint.setColor(Color.rgb(16, 18, 22));
         for (float[] p : pips) {
             float px = cx + p[0] * spread;
             float py = cy + p[1] * spread;
+            // Subtle dimple ring beneath pip
+            sheenPaint.setColor(Color.argb(45, 255, 255, 255));
+            canvas.drawCircle(px, py + pipRadius * 0.16f, pipRadius * 1.04f, sheenPaint);
+            // Main bold pip
             canvas.drawCircle(px, py, pipRadius, pipPaint);
-            // Tiny gloss dot inside pip
-            pipHighlightPaint.setColor(Color.argb(55, 255, 255, 255));
-            canvas.drawCircle(px - pipRadius * 0.25f, py - pipRadius * 0.25f, pipRadius * 0.28f, pipHighlightPaint);
         }
     }
 
     private void drawRolling3DCube(Canvas canvas, float cx, float baseCy, float traySize) {
-        // Max vertical jump upward above the tray
-        float maxLift = Math.max(traySize * 0.72f, baseCy - traySize * 0.62f);
+        // Chunky jump right over the dice tray (stays prominent like reference video)
+        float maxLift = traySize * 0.56f;
         float cy = baseCy - jumpProgress * maxLift;
 
-        // Ground shadow shrinks and softens as the die leaps upward
-        float shadowScale = 1f - 0.35f * jumpProgress;
-        float shadowHalfW = traySize * 0.44f * shadowScale;
+        // Soft ground shadow in tray
+        float shadowScale = 1.0f - 0.30f * jumpProgress;
+        float shadowHalfW = traySize * 0.46f * shadowScale;
         float shadowHalfH = traySize * 0.14f * shadowScale;
-        int shadowAlpha = (int) (75 * (1f - 0.55f * jumpProgress));
+        int shadowAlpha = (int) (80 * (1f - 0.48f * jumpProgress));
         shadowRect.set(cx - shadowHalfW, baseCy + traySize * 0.36f - shadowHalfH,
                 cx + shadowHalfW, baseCy + traySize * 0.36f + shadowHalfH);
-        shadowPaint.setColor(Color.argb(shadowAlpha, 0, 0, 0));
+        shadowPaint.setColor(Color.argb(shadowAlpha, 15, 15, 25));
         canvas.drawOval(shadowRect, shadowPaint);
 
-        // Precompute trig
         float cosX = (float) Math.cos(rotX), sinX = (float) Math.sin(rotX);
         float cosY = (float) Math.cos(rotY), sinY = (float) Math.sin(rotY);
         float cosZ = (float) Math.cos(rotZ), sinZ = (float) Math.sin(rotZ);
 
-        float camDist = 4.6f;
-        float cubeHalfPx = traySize * 0.44f * scaleBoost;
+        float camDist = 4.4f;
+        float cubeHalfPx = traySize * 0.45f * scaleBoost;
         float fovScale = cubeHalfPx * (camDist - 1f);
 
         for (int i = 0; i < 8; i++) {
@@ -367,17 +384,14 @@ public class Dice3DView extends View {
             float y0 = BASE_VERTS[i][1];
             float z0 = BASE_VERTS[i][2];
 
-            // Rz
             float x1 = x0 * cosZ - y0 * sinZ;
             float y1 = x0 * sinZ + y0 * cosZ;
             float z1 = z0;
 
-            // Ry
             float x2 = x1 * cosY + z1 * sinY;
             float y2 = y1;
             float z2 = -x1 * sinY + z1 * cosY;
 
-            // Rx
             float x3 = x2;
             float y3 = y2 * cosX - z2 * sinX;
             float z3 = y2 * sinX + z2 * cosX;
@@ -391,8 +405,7 @@ public class Dice3DView extends View {
             projected[i][1] = cy + y3 * fovScale * invZ;
         }
 
-        // Light vector (slightly top-left-front)
-        float lx = -0.32f, ly = -0.52f, lz = 0.79f;
+        float lx = -0.28f, ly = -0.58f, lz = 0.77f;
 
         for (int f = 0; f < 6; f++) {
             int i0 = FACES[f][1], i1 = FACES[f][2], i2 = FACES[f][3], i3 = FACES[f][4];
@@ -401,14 +414,12 @@ public class Dice3DView extends View {
             float[] p2 = transformed[i2];
             float[] p3 = transformed[i3];
 
-            // Face normal = (p1 - p0) x (p3 - p0)
             float ux = p1[0] - p0[0], uy = p1[1] - p0[1], uz = p1[2] - p0[2];
             float vx = p3[0] - p0[0], vy = p3[1] - p0[1], vz = p3[2] - p0[2];
             float nx = uy * vz - uz * vy;
             float ny = uz * vx - ux * vz;
             float nz = ux * vy - uy * vx;
 
-            // Normalize
             float len = (float) Math.sqrt(nx * nx + ny * ny + nz * nz);
             if (len > 0f) {
                 nx /= len;
@@ -416,49 +427,58 @@ public class Dice3DView extends View {
                 nz /= len;
             }
 
-            // Note: because Android canvas Y points down, front (+Z) face has (p1-p0)=(+2,0,0), (p3-p0)=(0,+2,0) -> normal (0,0,+1)
             float avgX = (p0[0] + p1[0] + p2[0] + p3[0]) * 0.25f;
             float avgY = (p0[1] + p1[1] + p2[1] + p3[1]) * 0.25f;
             float avgZ = (p0[2] + p1[2] + p2[2] + p3[2]) * 0.25f;
 
-            // Perspective backface test against camera at (0, 0, camDist)
             float viewDot = (-avgX) * nx + (-avgY) * ny + (camDist - avgZ) * nz;
 
             FaceDrawItem item = drawItems[f];
             item.faceIdx = f;
             item.avgZ = avgZ;
-            item.visible = viewDot > 0.02f;
+            item.visible = viewDot > 0.01f;
             float ndotl = Math.max(0f, nx * lx + ny * ly + nz * lz);
-            item.light = 0.64f + 0.36f * ndotl;
+            item.light = 0.66f + 0.34f * ndotl;
         }
 
-        // Painter's algorithm (back to front)
         Arrays.sort(drawItems, (a, b) -> Float.compare(a.avgZ, b.avgZ));
 
-        faceBorderPaint.setStrokeWidth(Math.max(1.5f, traySize * 0.045f));
+        // Pass 1: Soft thick rounded cushion silhouette so cube corners look puffy & molded
+        silhouettePaint.setStrokeWidth(Math.max(4f, traySize * 0.14f * scaleBoost));
+        for (FaceDrawItem item : drawItems) {
+            if (!item.visible) continue;
+            int f = item.faceIdx;
+            buildRoundedQuadPath(facePath,
+                    projected[FACES[f][1]], projected[FACES[f][2]],
+                    projected[FACES[f][3]], projected[FACES[f][4]], 0.24f);
+            int rimVal = (int) Math.min(235, 198 * item.light);
+            silhouettePaint.setColor(Color.rgb(rimVal, rimVal + 2, rimVal + 6));
+            canvas.drawPath(facePath, silhouettePaint);
+        }
 
+        // Pass 2: Smooth glossy gradient faces + bold perspective pips
+        faceSeamPaint.setStrokeWidth(Math.max(1f, traySize * 0.025f));
         for (FaceDrawItem item : drawItems) {
             if (!item.visible) continue;
             int f = item.faceIdx;
             int val = FACES[f][0];
             int i0 = FACES[f][1], i1 = FACES[f][2], i2 = FACES[f][3], i3 = FACES[f][4];
+            float[] q0 = projected[i0], q1 = projected[i1], q2 = projected[i2], q3 = projected[i3];
 
-            float[] q0 = projected[i0];
-            float[] q1 = projected[i1];
-            float[] q2 = projected[i2];
-            float[] q3 = projected[i3];
+            buildRoundedQuadPath(facePath, q0, q1, q2, q3, 0.26f);
 
-            // Slightly rounded quad path via corner chamfers for realistic molded dice edges
-            buildRoundedQuadPath(facePath, q0, q1, q2, q3, 0.14f);
-
-            int baseR = (int) Math.min(255, 250 * item.light);
-            int baseG = (int) Math.min(255, 251 * item.light);
-            int baseB = (int) Math.min(255, 255 * item.light);
-            faceFillPaint.setColor(Color.rgb(baseR, baseG, baseB));
+            int hi = (int) Math.min(255, 255 * Math.min(1f, item.light + 0.08f));
+            int lo = (int) Math.min(245, 224 * item.light);
+            faceFillPaint.setShader(new LinearGradient(
+                    q0[0], q0[1], q2[0], q2[1],
+                    Color.rgb(hi, hi, Math.min(255, hi + 2)),
+                    Color.rgb(lo, lo + 2, Math.min(255, lo + 8)),
+                    Shader.TileMode.CLAMP
+            ));
             canvas.drawPath(facePath, faceFillPaint);
-            canvas.drawPath(facePath, faceBorderPaint);
+            faceFillPaint.setShader(null);
+            canvas.drawPath(facePath, faceSeamPaint);
 
-            // Perspective-mapped pips on this 3D face
             draw3DFacePips(canvas, val, transformed[i0], transformed[i1], transformed[i2], transformed[i3],
                     cx, cy, camDist, fovScale, item.light);
         }
@@ -490,7 +510,6 @@ public class Dice3DView extends View {
     private void draw3DFacePips(Canvas canvas, int val,
                                 float[] p0, float[] p1, float[] p2, float[] p3,
                                 float cx, float cy, float camDist, float fovScale, float light) {
-        // Face center and local U/V basis in 3D
         float centerX = (p0[0] + p1[0] + p2[0] + p3[0]) * 0.25f;
         float centerY = (p0[1] + p1[1] + p2[1] + p3[1]) * 0.25f;
         float centerZ = (p0[2] + p1[2] + p2[2] + p3[2]) * 0.25f;
@@ -503,12 +522,13 @@ public class Dice3DView extends View {
         float vy = (p3[1] - p0[1]) * 0.5f;
         float vz = (p3[2] - p0[2]) * 0.5f;
 
-        int pipShade = (int) (18 + 26 * (1f - light));
-        pipPaint.setColor(Color.rgb(pipShade, pipShade + 2, pipShade + 6));
+        int pipShade = (int) (14 + 24 * (1f - light));
+        pipPaint.setColor(Color.rgb(pipShade, pipShade + 2, pipShade + 4));
 
-        float pipR = 0.175f;
+        // Larger chunky pips matching Ludo King 3D die
+        float pipR = 0.23f;
         float[][] pips = PIP_COORDS[val];
-        final int segs = 10;
+        final int segs = 12;
 
         for (float[] pip : pips) {
             float pu = pip[0];

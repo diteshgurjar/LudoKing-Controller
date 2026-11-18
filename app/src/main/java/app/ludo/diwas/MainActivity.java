@@ -107,6 +107,7 @@ public class MainActivity extends AppCompatActivity {
 
     SoundPool soundPool;
     int spStep = 0, spDice = 0, spSafe = 0, spDeath = 0, spPanta = 0;
+    int lastStepStreamId = 0;
 
     int reddicevalue,greendicevalue,bluedicevalue,yellowdicevalue;
 
@@ -1498,7 +1499,7 @@ public class MainActivity extends AppCompatActivity {
                     diceHandler.postDelayed(() -> {
                         switchPlayers();
                         isDiceClickable = true;
-                    }, 420);
+                    }, 600);
                 }
             });
         }
@@ -1686,10 +1687,10 @@ public class MainActivity extends AppCompatActivity {
 
         float total = onePercentWidth * 40;
         float homeCircleWidth = (float) ((total * 0.64) * 0.25);
-        float pieceBlockSize = (float) (pxWidth * 0.065);
-        float lifty = (float) (24.5 * displayMetrics.density);
+        float pieceBlockSize = (float) (pxWidth * 0.0667);
         pieceWidth = 34 * displayMetrics.density;
         pieceHeight = 41 * displayMetrics.density;
+        float lifty = Math.max(0f, pieceHeight - homeCircleWidth * 0.94f);
         float pushx;
         if (homeCircleWidth >= pieceWidth) {
             pushx = (float) ((homeCircleWidth - pieceWidth) / 2);
@@ -1701,7 +1702,7 @@ public class MainActivity extends AppCompatActivity {
         } else {
             pushXForPieces = (float) -((pieceWidth - pieceBlockSize) / 2);
         }
-        pushYForPieces = lifty;
+        pushYForPieces = Math.max(0f, pieceHeight - pieceBlockSize * 0.86f);
         if (!normalPiece) {
             pushx /= 1.5;
             lifty /= 3;
@@ -2540,7 +2541,7 @@ public class MainActivity extends AppCompatActivity {
                 public void run() {
                     d.roll();
                 }
-            },150);
+            },320);
         } else {
             moveDice(currentPlayerPosition);
             hintArrow.setVisibility(View.VISIBLE);
@@ -2869,6 +2870,12 @@ public class MainActivity extends AppCompatActivity {
 
         editText = findViewById(R.id.editTextNumber);
         controllerModeBanner = findViewById(R.id.controllerModeBanner);
+        if (controllerModeBanner != null) {
+            controllerModeBanner.setOnClickListener(v -> {
+                controllerBannerHidden = true;
+                controllerModeBanner.setVisibility(GONE);
+            });
+        }
 
         RelativeLayout.LayoutParams layoutParams = new RelativeLayout.LayoutParams(((int)(pxWidth)),((int)(pxWidth)));
         ludoBoard.setLayoutParams(layoutParams); // size of board set
@@ -2999,7 +3006,10 @@ public class MainActivity extends AppCompatActivity {
     void playStepSound() {
         if (!isSoundOn) return;
         if (soundPool != null && spStep != 0) {
-            soundPool.play(spStep, 1f, 1f, 1, 0, 1.05f);
+            if (lastStepStreamId != 0) {
+                soundPool.stop(lastStepStreamId);
+            }
+            lastStepStreamId = soundPool.play(spStep, 1f, 1f, 1, 0, 1.15f);
         } else if (stepSound != null) {
             try { stepSound.seekTo(120); stepSound.start(); } catch (Exception ignored) {}
         }
@@ -3040,7 +3050,7 @@ public class MainActivity extends AppCompatActivity {
         for (int padId : padIds) {
             View pad = findViewById(padId);
             if (pad != null) {
-                pad.setAlpha(padId == activePadId ? 1.0f : 0.78f);
+                pad.setAlpha(1.0f);
             }
         }
         if (activeDiceGlow != null) {
@@ -3059,7 +3069,7 @@ public class MainActivity extends AppCompatActivity {
         ConstraintLayout.LayoutParams lps = (ConstraintLayout.LayoutParams) mainDiceImageView.getLayoutParams();
         lps.startToStart = ConstraintLayout.LayoutParams.UNSET;
         lps.setMarginStart(0);
-        lps.setMarginEnd(-((int) (3 * displayMetrics.density)));
+        lps.setMarginEnd(-((int) (9 * displayMetrics.density)));
         lps.endToEnd = R.id.tleftdicebg;
         lps.bottomToBottom = R.id.tleftdicebg;
         mainDiceImageView.setLayoutParams(lps);
@@ -3077,7 +3087,7 @@ public class MainActivity extends AppCompatActivity {
     {
         ConstraintLayout.LayoutParams lps = (ConstraintLayout.LayoutParams) mainDiceImageView.getLayoutParams();
         lps.startToStart = R.id.trightdicebg;
-        lps.setMarginStart(-((int) (3 * displayMetrics.density)));
+        lps.setMarginStart(-((int) (9 * displayMetrics.density)));
         lps.setMarginEnd(0);
         lps.endToEnd = ConstraintLayout.LayoutParams.UNSET;
         lps.bottomToBottom = R.id.trightdicebg;
@@ -3096,7 +3106,7 @@ public class MainActivity extends AppCompatActivity {
     {
         ConstraintLayout.LayoutParams lps = (ConstraintLayout.LayoutParams) mainDiceImageView.getLayoutParams();
         lps.startToStart = R.id.brightdicebg;
-        lps.setMarginStart(-((int) (3 * displayMetrics.density)));
+        lps.setMarginStart(-((int) (9 * displayMetrics.density)));
         lps.setMarginEnd(0);
         lps.endToEnd = ConstraintLayout.LayoutParams.UNSET;
         lps.bottomToBottom = R.id.brightdicebg;
@@ -3116,7 +3126,7 @@ public class MainActivity extends AppCompatActivity {
         ConstraintLayout.LayoutParams lps = (ConstraintLayout.LayoutParams) mainDiceImageView.getLayoutParams();
         lps.startToStart = ConstraintLayout.LayoutParams.UNSET;
         lps.setMarginStart(0);
-        lps.setMarginEnd(-((int) (3 * displayMetrics.density)));
+        lps.setMarginEnd(-((int) (9 * displayMetrics.density)));
         lps.endToEnd = R.id.bleftdicebg;
         lps.bottomToBottom = R.id.bleftdicebg;
         mainDiceImageView.setLayoutParams(lps);
