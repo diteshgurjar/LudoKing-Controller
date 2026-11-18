@@ -20,9 +20,10 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.res.Resources;
 import android.graphics.PorterDuff;
-import android.graphics.drawable.AnimationDrawable;
 import android.graphics.drawable.Drawable;
+import android.media.AudioAttributes;
 import android.media.MediaPlayer;
+import android.media.SoundPool;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -63,6 +64,7 @@ import app.ludo.diwas.protocol.Commands;
 import app.ludo.diwas.protocol.Events;
 import app.ludo.diwas.protocol.GameStateMessage;
 import app.ludo.diwas.protocol.Serialization;
+import app.ludo.diwas.ui.Dice3DView;
 import org.json.JSONObject;
 import android.util.Log;
 
@@ -98,7 +100,13 @@ public class MainActivity extends AppCompatActivity {
     float pushXForPieces;
     float pushYForPieces;
 
-    ImageView mainDiceImageView,hintArrow;
+    Dice3DView mainDiceImageView;
+    ImageView hintArrow;
+    View activeDiceGlow;
+    ObjectAnimator activeGlowAnimator;
+
+    SoundPool soundPool;
+    int spStep = 0, spDice = 0, spSafe = 0, spDeath = 0, spPanta = 0;
 
     int reddicevalue,greendicevalue,bluedicevalue,yellowdicevalue;
 
@@ -316,27 +324,56 @@ public class MainActivity extends AppCompatActivity {
         {
             isAlive = true;
             currBlock = startPosition;
-            piece.animate().translationX(x[startPosition]+pushXForPieces).translationY(y[startPosition]-pushYForPieces).setDuration(400).start(); // 16 75
-            globalHandler.postDelayed(() -> {
-                isDiceMovableExtraChance = true;
-                if(!isBotPiece) { hintArrow.setVisibility(View.VISIBLE); }
-                checkAdjustments(currBlock);
-                if(currBlock>=24 && currBlock<=51) {
-                    piece.setElevation(51-currBlock);
-                } else if(currBlock>=64 && currBlock<=69) {
-                    piece.setElevation(70-currBlock);
-                } else {
-                    piece.setElevation(currBlock);
-                }
-            },400);
-            globalHandler.postDelayed(new Runnable() {
+            playStepSound();
+            final float startX = piece.getTranslationX();
+            final float startY = piece.getTranslationY();
+            final float targetX = x[startPosition] + pushXForPieces;
+            final float targetY = y[startPosition] - pushYForPieces;
+            final float arcHeight = blockSize * 0.85f;
+            piece.setElevation(85f);
+
+            ValueAnimator leapAnim = ValueAnimator.ofFloat(0f, 1f);
+            leapAnim.setDuration(290L);
+            leapAnim.addUpdateListener(anim -> {
+                float t = (float) anim.getAnimatedValue();
+                float arc = (float) Math.sin(Math.PI * t);
+                piece.setTranslationX(startX + (targetX - startX) * t);
+                piece.setTranslationY(startY + (targetY - startY) * t - arc * arcHeight);
+                float sc = 1.0f + 0.30f * arc;
+                piece.setScaleX(sc);
+                piece.setScaleY(sc);
+            });
+            leapAnim.addListener(new AnimatorListenerAdapter() {
                 @Override
-                public void run() {
-                    if(isBotPiece) {
-                        d.roll();
+                public void onAnimationEnd(Animator animation) {
+                    piece.setTranslationX(targetX);
+                    piece.setTranslationY(targetY);
+                    piece.setScaleX(1.0f);
+                    piece.setScaleY(1.0f);
+                    showStep(1, colour, x[startPosition], y[startPosition]);
+                    playSafeSound();
+                    isDiceMovableExtraChance = true;
+                    if (!isBotPiece) { hintArrow.setVisibility(View.VISIBLE); }
+                    applyBlockElevation();
+                    checkAdjustments(currBlock);
+                    if (isBotPiece) {
+                        globalHandler.postDelayed(() -> d.roll(), 200);
                     }
                 }
-            },550);
+            });
+            leapAnim.start();
+        }
+
+        void applyBlockElevation() {
+            if (currBlock >= 24 && currBlock <= 51) {
+                piece.setElevation(51 - currBlock);
+            } else if (currBlock >= 64 && currBlock <= 69) {
+                piece.setElevation(70 - currBlock);
+            } else if (currBlock >= 0) {
+                piece.setElevation(currBlock);
+            } else {
+                piece.setElevation(2f);
+            }
         }
 
         void die()
@@ -347,18 +384,9 @@ public class MainActivity extends AppCompatActivity {
             checkAdjustments(currBlock);
             currWinnerBlock=0;
             numberOfSteps = 0;
-            if(isSoundOn) {
-                deathSound = MediaPlayer.create(MainActivity.this, R.raw.death);
-                deathSound.start();
-                deathSound.setOnCompletionListener(new MediaPlayer.OnCompletionListener() {
-                    @Override
-                    public void onCompletion(MediaPlayer mediaPlayer) {
-                        deathSound.release();
-                    }
-                });
-            }
+            playDeathSound();
 
-
+            piece.setElevation(75f);
             Runnable r = new Runnable() {
                 @Override
                 public void run() {
@@ -367,19 +395,17 @@ public class MainActivity extends AppCompatActivity {
                         if(currBlock==0) currBlock=51; else --currBlock;
                         piece.setTranslationX(x[currBlock]+pushXForPieces);
                         piece.setTranslationY(y[currBlock]-pushYForPieces);
-                        globalHandler.postDelayed(this,20);
+                        globalHandler.postDelayed(this,18);
                     } else {
-                        if(piece.getScaleX()<1.0f) {
-                            piece.setScaleX(1.0f);
-                            piece.setScaleY(1.0f);
-                        }
-                        piece.animate().translationX(defX).translationY(defY).setDuration(400).start();
+                        currBlock = -1;
+                        piece.setScaleX(1.0f);
+                        piece.setScaleY(1.0f);
+                        piece.animate().translationX(defX).translationY(defY).setDuration(300).withEndAction(() -> piece.setElevation(2f)).start();
                         globalHandler.removeCallbacks(this);
                     }
                 }
             };
             globalHandler.post(r);
-            //piece.animate().translationX(defX).translationY(defY).setDuration(400).start();
         }
 
         void activeState()
@@ -387,12 +413,13 @@ public class MainActivity extends AppCompatActivity {
             isClickable = true;
             rotateAnimator.start();
             readyToPick.setVisibility(View.VISIBLE);
-            if(piece.getScaleX()<1.0f) {
+            piece.setElevation(80f);
+            if(piece.getScaleX()<0.95f) {
                 piece.setScaleX(0.95f);
                 piece.setScaleY(0.95f);
             } else {
-                piece.setScaleX(1.0f);
-                piece.setScaleY(1.0f);
+                piece.setScaleX(1.05f);
+                piece.setScaleY(1.05f);
             }
         }
 
@@ -401,31 +428,25 @@ public class MainActivity extends AppCompatActivity {
             isClickable = false;
             rotateAnimator.cancel();
             readyToPick.setVisibility(View.INVISIBLE);
+            applyBlockElevation();
             if(currBlock!=-1) {
                 checkAdjustments(currBlock);
+            } else {
+                piece.setScaleX(1.0f);
+                piece.setScaleY(1.0f);
             }
         }
 
         void move(int n) {
             isClickable = false;
-            if(stepSound!=null) {
-                if(isSoundOn) {
-                    if (!stepSound.isPlaying()) {
-                        stepSound.seekTo(120);
-                        stepSound.start();
-                    } else if (stepSound.isPlaying()) {
-                        stepSound.pause();
-                        stepSound.seekTo(120);
-                        stepSound.start();
-                    }
-                }
-            }
-
-
+            playStepSound();
 
             if (currBlock == -1) {
                 currBlock = startPosition;
             }
+
+            final float startX = piece.getTranslationX();
+            final float startY = piece.getTranslationY();
 
             if(currBlock>=51)
                 currBlock = 0;
@@ -442,83 +463,53 @@ public class MainActivity extends AppCompatActivity {
 
             if(currBlock==endPosition) { winnerBlocks = getWinnerBlocks(endPosition); isReadyToEnterWinnerZone = true; }
 
-            piece.animate().translationX(x[currBlock] + pushXForPieces).translationY(y[currBlock] - pushYForPieces).setDuration(220).start();
-            /*if(!isReadyToEnterWinnerZone)
-            {
-                piece.animate().translationX(x[currBlock] + pushXForPieces).translationY(y[currBlock] - pushYForPieces).setDuration(300).start();
-            } else {
-                piece.animate().translationX(x[winnerBlocks[currWinnerBlock]] + pushXForPieces).translationY(y[winnerBlocks[currWinnerBlock]] - pushYForPieces).setDuration(300).start();
-            }*/
+            final float targetX = x[currBlock] + pushXForPieces;
+            final float targetY = y[currBlock] - pushYForPieces;
+            final float arcHeight = blockSize * 0.55f;
+            piece.setElevation(85f);
 
-            PropertyValuesHolder scaleX = PropertyValuesHolder.ofFloat(View.SCALE_X, 1.0f, 1.4f);
-            PropertyValuesHolder scaleY = PropertyValuesHolder.ofFloat(View.SCALE_Y, 1.0f, 1.4f);
-            ObjectAnimator popUpAnimator = ObjectAnimator.ofPropertyValuesHolder(piece, scaleX, scaleY);
-            popUpAnimator.setDuration(100);
-            scaleX = PropertyValuesHolder.ofFloat(View.SCALE_X, 1.4f, 1.0f);
-            scaleY = PropertyValuesHolder.ofFloat(View.SCALE_Y, 1.4f, 1.0f);
-            ObjectAnimator popDownAnimator = ObjectAnimator.ofPropertyValuesHolder(piece, scaleX, scaleY);
-            popDownAnimator.setDuration(90);
+            ValueAnimator hopAnim = ValueAnimator.ofFloat(0f, 1f);
+            hopAnim.setDuration(165L);
+            hopAnim.addUpdateListener(anim -> {
+                float t = (float) anim.getAnimatedValue();
+                float arc = (float) Math.sin(Math.PI * t);
+                piece.setTranslationX(startX + (targetX - startX) * t);
+                piece.setTranslationY(startY + (targetY - startY) * t - arc * arcHeight);
+                float sc = 1.0f + 0.28f * arc;
+                piece.setScaleX(sc);
+                piece.setScaleY(sc);
+            });
+            hopAnim.addListener(new AnimatorListenerAdapter() {
+                @Override
+                public void onAnimationEnd(Animator animation) {
+                    piece.setTranslationX(targetX);
+                    piece.setTranslationY(targetY);
+                    piece.setScaleX(1.0f);
+                    piece.setScaleY(1.0f);
 
-            /*ObjectAnimator alphaAnimator = ObjectAnimator.ofFloat(view, View.ALPHA, 1.0f, 0.0f);
-            alphaAnimator.setDuration(duration);*/
-
-            AnimatorSet animatorSet = new AnimatorSet();
-            animatorSet.playSequentially(popUpAnimator,popDownAnimator);
-            animatorSet.start();
-
-
-
-
-            globalHandler.postDelayed(() -> {
-                if(n>1) {
-                    int step = currBlock;
-                    globalHandler.postDelayed( ()-> {
-                        showStep(n,this.colour,x[step],y[step]);
-                    },100);
-                    numberOfSteps++;
-                    move(n - 1);
-                } else {
-                    showStep(n,this.colour,x[currBlock],y[currBlock]);
-                    isThisPlayerWon = false;
-                    if(currBlock>=24 && currBlock<=51) {
-                        piece.setElevation(51-currBlock);
-                    } else if(currBlock>=64 && currBlock<=69) {
-                        piece.setElevation(70-currBlock);
+                    if (n > 1) {
+                        showStep(n, colour, x[currBlock], y[currBlock]);
+                        numberOfSteps++;
+                        move(n - 1);
                     } else {
-                        piece.setElevation(currBlock);
-                    }
-                    stepSound.pause();
-                    numberOfSteps++;
+                        showStep(n, colour, x[currBlock], y[currBlock]);
+                        isThisPlayerWon = false;
+                        applyBlockElevation();
+                        numberOfSteps++;
 
-                    boolean isDeadChanceAvailable = false;
+                        boolean isDeadChanceAvailable = false;
 
-                    if(safeSpots.contains(currBlock) && isSoundOn)
-                    {
-                        safeSound = MediaPlayer.create(MainActivity.this,R.raw.safe);
-                        safeSound.start();
-                        safeSound.setOnCompletionListener(new MediaPlayer.OnCompletionListener() {
-                            @Override
-                            public void onCompletion(MediaPlayer mediaPlayer) {
-                                safeSound.release();
-                            }
-                        });
-                    } else if(currWinnerBlock>0) {
-                        int temp = 0;
-                        if(currWinnerBlock>5)
+                        if(safeSpots.contains(currBlock))
                         {
-                            hasCompletedItsPurpose = true;
-                            if(isSoundOn) {
-                                pantaSound = MediaPlayer.create(MainActivity.this, R.raw.panta);
-                                pantaSound.start();
-                                pantaSound.setOnCompletionListener(new MediaPlayer.OnCompletionListener() {
-                                    @Override
-                                    public void onCompletion(MediaPlayer mediaPlayer) {
-                                        pantaSound.release();
-                                    }
-                                });
-                            }
+                            playSafeSound();
+                        } else if(currWinnerBlock>0) {
+                            int temp = 0;
+                            if(currWinnerBlock>5)
+                            {
+                                hasCompletedItsPurpose = true;
+                                playPantaSound();
 
-                            List<Piece> pieces = getPiecesByColor(this.colour);
+                                List<Piece> pieces = getPiecesByColor(Piece.this.colour);
                             for(Piece p: pieces) { if(p.hasCompletedItsPurpose) { temp++; } }
 
                             int pantaValue = 4;
@@ -657,33 +648,26 @@ public class MainActivity extends AppCompatActivity {
                             }
                         }
                     } else {
-                        isDeadChanceAvailable = checkDeath(this,currBlock);
+                        isDeadChanceAvailable = checkDeath(Piece.this, currBlock);
                     }
 
-                    globalHandler.postDelayed(new Runnable() {
-                        @Override
-                        public void run() {
-                            if(!isThisPlayerWon) { checkAdjustments(currBlock); }
-                        }
-                    },10);
-                    //checkAdjustments(currBlock);
+                    globalHandler.postDelayed(() -> {
+                        if (!isThisPlayerWon) { checkAdjustments(currBlock); }
+                    }, 10);
 
                     if(diceValue == 6 || currWinnerBlock>5 || isDeadChanceAvailable && !isThisPlayerWon) {
                         isDiceMovableExtraChance = true;
                         if(!isBotPiece) { hintArrow.setVisibility(View.VISIBLE); } else {
-                            globalHandler.postDelayed(new Runnable() {
-                                @Override
-                                public void run() {
-                                    d.roll();
-                                }
-                            },150);
+                            globalHandler.postDelayed(() -> d.roll(), 180);
                         }
                     } else {
                         switchPlayers();
                         d.isDiceClickable = true;
                     }
+                    }
                 }
-            }, 200); //325
+            });
+            hopAnim.start();
         }
 
 
@@ -754,6 +738,9 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showGameOverScreen() {
+        if (activeDiceGlow != null) {
+            activeDiceGlow.setVisibility(GONE);
+        }
         congratulationslayout.setVisibility(View.VISIBLE);
 
         // Tell every connected controller the game is over.
@@ -1041,57 +1028,46 @@ public class MainActivity extends AppCompatActivity {
             if(xi>=players.size()-1) { xi = 0; } else { xi++; }
         }
         int n = pairs.size();
-        if(n>1) {
-            if(horizontal) {
-                float extra = 4 * displayMetrics.density, yextra = 17 * displayMetrics.density;
-                float xt = x[targetBox] + pushXForPieces, yt = y[targetBox];
-                float scale = 100f / ((n) * 30 + 75);
-                float gap = 100f - scale;
-                //Toast.makeText(this, scale + "", Toast.LENGTH_SHORT).show();
-                float space = blockSize - (pieceWidth * scale * 0.35f * n + pieceWidth * scale * 0.65f) / 2;
-                if (space <= 0) {
-                    space = 0;
+        if (n > 1) {
+            float baseX = x[targetBox] + pushXForPieces;
+            float baseY = y[targetBox] - pushYForPieces;
+            float scale = (n == 2) ? 0.76f : (n == 3) ? 0.66f : 0.56f;
+            float spreadX = (n == 2) ? blockSize * 0.28f : (n == 3) ? blockSize * 0.24f : blockSize * 0.20f;
+            float baseElev = (targetBox >= 24 && targetBox <= 51) ? (51 - targetBox)
+                    : (targetBox >= 64 && targetBox <= 69) ? (70 - targetBox) : targetBox;
+
+            for (int i = 0; i < n; i++) {
+                Piece p = pairs.get(i);
+                ConstraintLayout piece = p.piece;
+                float offsetX;
+                float offsetY;
+                if (n <= 3) {
+                    offsetX = (i - (n - 1) / 2f) * spreadX;
+                    offsetY = (i % 2 == 0) ? 0f : blockSize * 0.05f;
+                } else {
+                    int col = i % 2;
+                    int row = i / 2;
+                    offsetX = (col == 0 ? -0.5f : 0.5f) * spreadX * 1.15f;
+                    offsetY = (row - ((n - 1) / 2) * 0.5f) * (blockSize * 0.22f);
                 }
-                space = 0;
-                //scale = 0.70f;
-                for (int i = 0; i < n; i++) {
-                    Piece p = pairs.get(i);
-                    ConstraintLayout piece = p.piece;
-                    piece.setScaleX(scale);
-                    piece.setScaleY(scale);
-                    piece.setTranslationX(xt - ((blockSize - (pieceWidth * scale)) / 2) + ((pieceWidth * scale * 0.30f) * i) - (extra * scale * (n / 2)) + space);
-                    if(normalPiece) { piece.setTranslationY(yt - pieceHeight / 2); } else { piece.setTranslationY(yt - (pieceHeight/2) / 2); }
-                }
-            } else {
-                float elevation = pairs.get(0).piece.getElevation();
-                float extra = 4 * displayMetrics.density, yextra = 8 * displayMetrics.density;
-                float xt = x[targetBox] + pushXForPieces, yt = y[targetBox]-pushYForPieces;
-                float scale = 100f / ((n) * 30 + 75);
-                float gap = 100f - scale;
-                //Toast.makeText(this, scale + "", Toast.LENGTH_SHORT).show();
-                float space = blockSize - (pieceWidth * scale * 0.35f * n + pieceWidth * scale * 0.65f) / 2;
-                if (space <= 0) {
-                    space = 0;
-                }
-                space = 0;
-                //scale = 0.70f;
-                for (int i = 0; i < n; i++) {
-                    Piece p = pairs.get(i);
-                    ConstraintLayout piece = p.piece;
-                    piece.setElevation(elevation++);
-                    piece.setScaleX(scale);
-                    piece.setScaleY(scale);
-                    piece.setTranslationX(xt);
-                    if(normalPiece) {piece.setTranslationY(yt - ((blockSize - (pieceWidth * scale)) / 2) + ((pieceWidth * scale * 0.30f) * i)); }
-                    else { piece.setTranslationY((yt - ((blockSize - (pieceWidth * scale)) / 2) + ((pieceWidth * scale * 0.30f) * i))-(pieceWidth * scale * 0.30f)); }
-                }
+                piece.setElevation(baseElev + i);
+                piece.animate()
+                        .scaleX(scale)
+                        .scaleY(scale)
+                        .translationX(baseX + offsetX)
+                        .translationY(baseY + offsetY)
+                        .setDuration(110L)
+                        .start();
             }
-        } else if(pairs.size()==1) {
+        } else if (pairs.size() == 1) {
             Piece p = pairs.get(0);
-            p.piece.setScaleX(1.0f);
-            p.piece.setScaleY(1.0f);
-            p.piece.setTranslationX(x[targetBox]+pushXForPieces);
-            p.piece.setTranslationY(y[targetBox]-pushYForPieces);
+            p.piece.animate()
+                    .scaleX(1.0f)
+                    .scaleY(1.0f)
+                    .translationX(x[targetBox] + pushXForPieces)
+                    .translationY(y[targetBox] - pushYForPieces)
+                    .setDuration(110L)
+                    .start();
         }
     }
 
@@ -1126,8 +1102,8 @@ public class MainActivity extends AppCompatActivity {
 
     class Dice
     {
-        ImageView diceImgView,tLeftImgColor,tRightImgColor,bLeftImgColor,bRightImgColor;
-        AnimationDrawable diceAnimationDrawable;
+        Dice3DView diceImgView;
+        ImageView tLeftImgColor,tRightImgColor,bLeftImgColor,bRightImgColor;
 
         Handler diceHandler;
         boolean isRolling, isDiceClickable;
@@ -1145,19 +1121,11 @@ public class MainActivity extends AppCompatActivity {
             roll();
         }
 
-        Dice(ImageView diceImgView,int nop,String color)
+        Dice(Dice3DView diceImgView,int nop,String color)
         {
             this.diceImgView = diceImgView;
             this.numberOfPlayers = nop;
-            diceAnimationDrawable = new AnimationDrawable();
-            diceAnimationDrawable.addFrame(ResourcesCompat.getDrawable(getResources(),R.drawable.dice0001,null),50);
-            diceAnimationDrawable.addFrame(ResourcesCompat.getDrawable(getResources(),R.drawable.dice0002,null),50);
-            diceAnimationDrawable.addFrame(ResourcesCompat.getDrawable(getResources(),R.drawable.dice0003,null),50);
-            diceAnimationDrawable.addFrame(ResourcesCompat.getDrawable(getResources(),R.drawable.dice0004,null),50);
-            diceAnimationDrawable.addFrame(ResourcesCompat.getDrawable(getResources(),R.drawable.dice0005,null),50);
-            diceAnimationDrawable.addFrame(ResourcesCompat.getDrawable(getResources(),R.drawable.dice0006,null),50);
-            diceAnimationDrawable.addFrame(ResourcesCompat.getDrawable(getResources(),R.drawable.dice0007,null),50);
-            diceAnimationDrawable.addFrame(ResourcesCompat.getDrawable(getResources(),R.drawable.dice0008,null),50);
+            this.diceImgView.setValueImmediate(1);
 
             tLeftLayout = findViewById(R.id.tleftdicebg);
             tRightLayout = findViewById(R.id.trightdicebg);
@@ -1175,15 +1143,17 @@ public class MainActivity extends AppCompatActivity {
             isRolling = false;
             isDiceClickable = true;
 
-            diceImgView.setOnClickListener(new View.OnClickListener() {
-                @Override
-                public void onClick(View view) {
-                    if(!isRolling && (isDiceClickable || isDiceMovableExtraChance)) {
-                        hintArrow.setVisibility(GONE);
-                        roll();
-                    }
+            View.OnClickListener rollClickListener = view -> {
+                if(!isRolling && (isDiceClickable || isDiceMovableExtraChance)) {
+                    hintArrow.setVisibility(GONE);
+                    roll();
                 }
-            });
+            };
+            diceImgView.setOnClickListener(rollClickListener);
+            tLeftLayout.setOnClickListener(v -> { if (currentPlayerPosition == 1) rollClickListener.onClick(v); });
+            tRightLayout.setOnClickListener(v -> { if (currentPlayerPosition == 2) rollClickListener.onClick(v); });
+            bLeftLayout.setOnClickListener(v -> { if (currentPlayerPosition == 3) rollClickListener.onClick(v); });
+            bRightLayout.setOnClickListener(v -> { if (currentPlayerPosition == 4) rollClickListener.onClick(v); });
 
             if(nop==2) {
                 menuremoveplayersbtn.setVisibility(GONE);
@@ -1280,59 +1250,33 @@ public class MainActivity extends AppCompatActivity {
             isRolling = true;
             isDiceClickable = false;
             isDiceMovableExtraChance = false;
-            if(isSoundOn) {
-                if (diceRollSound.isPlaying()) {
-                    diceRollSound.pause();
-                }
-                diceRollSound.seekTo(5);
-                diceRollSound.start();
+            playDiceSound();
+
+            int ch;
+            // Priority 1: FIXED DICE value set by the Controller. STICKY: it is
+            // NOT consumed — every roll shows this number until the controller
+            // changes or clears it. No clickability/mode checks here, so a fixed
+            // value can never be silently dropped.
+            if (controlledValue != null && controlledValue >= 1 && controlledValue <= 6) {
+                ch = controlledValue;
+            } else {
+                // Priority 2: manual editText override (dev debug field, normally gone)
+                ch = (int) Math.ceil(Math.random() * 6);
+                String number = editText.getText().toString();
+                try {
+                    int n = Integer.parseInt(number);
+                    if (n >= 1 && n <= 6) ch = n;
+                } catch (Exception e) {}
             }
-            mainDiceImageView.setImageDrawable(diceAnimationDrawable);
-            diceAnimationDrawable.setOneShot(true);
-            diceAnimationDrawable.start();
-            diceHandler.postDelayed(() -> {
-                int ch;
-                // Priority 1: FIXED DICE value set by the Controller. STICKY: it is
-                // NOT consumed — every roll shows this number until the controller
-                // changes or clears it. No clickability/mode checks here, so a fixed
-                // value can never be silently dropped.
-                if (controlledValue != null && controlledValue >= 1 && controlledValue <= 6) {
-                    ch = controlledValue;
-                } else {
-                    // Priority 2: manual editText override (dev debug field, normally gone)
-                    ch = (int) Math.ceil(Math.random()*6);
-                    String number = editText.getText().toString();
-                    try {
-                        int n = Integer.parseInt(number);
-                        if (n >= 1 && n <= 6) ch = n;
-                    } catch (Exception e) {}
-                }
-                switch (ch) {
-                    case 1:
-                        mainDiceImageView.setImageDrawable(ResourcesCompat.getDrawable(getResources(), R.drawable.dice1, null));
-                        break;
-                    case 2:
-                        mainDiceImageView.setImageDrawable(ResourcesCompat.getDrawable(getResources(), R.drawable.dice2, null));
-                        break;
-                    case 3:
-                        mainDiceImageView.setImageDrawable(ResourcesCompat.getDrawable(getResources(), R.drawable.dice3, null));
-                        break;
-                    case 4:
-                        mainDiceImageView.setImageDrawable(ResourcesCompat.getDrawable(getResources(), R.drawable.dice4, null));
-                        break;
-                    case 5:
-                        mainDiceImageView.setImageDrawable(ResourcesCompat.getDrawable(getResources(), R.drawable.dice5, null));
-                        break;
-                    case 6:
-                        mainDiceImageView.setImageDrawable(ResourcesCompat.getDrawable(getResources(), R.drawable.dice6, null));
-                        break;
-                }
+
+            final int rolledValue = ch;
+            diceImgView.rollTo(rolledValue, settledValue -> {
+                final int finalCh = settledValue;
                 isRolling = false;
 
-                currentPlayerDice = ch;
+                currentPlayerDice = finalCh;
 
                 // Broadcast DICE_ROLLED so every controller sees the live value
-                final int finalCh = ch;
                 try {
                     JSONObject payload = new JSONObject();
                     payload.put(Events.FIELD_DICE, finalCh);
@@ -1347,16 +1291,15 @@ public class MainActivity extends AppCompatActivity {
                 int x;
                 if(currentPlayerIndex==0) { x=players.size()-1; } else { x=currentPlayerIndex-1; }
                 Player currentPlayer = players.get(x);
-                //Toast.makeText(MainActivity.this, currentPlayer.color+"", Toast.LENGTH_SHORT).show();
 
-                 int chances = 0;
-                 int autoMoveBlock = -1;
+                int chances = 0;
+                int autoMoveBlock = -1;
 
-                 List<Piece> movablePieces = new ArrayList<>();
+                List<Piece> movablePieces = new ArrayList<>();
 
                 for(Piece p : pieces)
                 {
-                    if(p.check(ch))
+                    if(p.check(finalCh))
                     {
                         if(chances==0) {
                             autoMoveBlock = p.currBlock;
@@ -1389,7 +1332,7 @@ public class MainActivity extends AppCompatActivity {
                             best = p;
                         }
                     }
-                    if (best == null && ch == 6) {
+                    if (best == null && finalCh == 6) {
                         for (Piece p : pieces) {
                             if (!p.isAlive) { best = p; break; }
                         }
@@ -1408,9 +1351,8 @@ public class MainActivity extends AppCompatActivity {
                         currentPlayerDice = -1;
                         for(Piece p : pieces) { p.inactiveState(); }
                         checkAdjustments(autoMove.currBlock);
-                        autoMove.move(ch);
+                        autoMove.move(finalCh);
                         autoMove=null;
-                        //Toast.makeText(MainActivity.this, x+"", Toast.LENGTH_SHORT).show();
                     }
                     else if(!autoMove.isAlive && currentPlayerDice==6) {
                         currentPlayerDice = -1;
@@ -1436,7 +1378,7 @@ public class MainActivity extends AppCompatActivity {
                     }
 
                     // making pieces alive minimum+0.5 priority
-                    if(ch==6) {
+                    if(finalCh==6) {
                     for(Piece p : pieces) {
                         if(!p.isAlive) {
                             bestMovablePiece = p;
@@ -1448,7 +1390,7 @@ public class MainActivity extends AppCompatActivity {
                     // panta chesing purpose min+1 priority
                     for(Piece p : movablePieces) {
                         if(p.isReadyToEnterWinnerZone) {
-                            int thispantapriority = p.currWinnerBlock+ch;
+                            int thispantapriority = p.currWinnerBlock+finalCh;
                             if(thispantapriority>pantapriority) {
                                 pantapriority = thispantapriority;
                                 bestMovablePiece = p;
@@ -1458,7 +1400,7 @@ public class MainActivity extends AppCompatActivity {
 
                     // moving to safe spots medium
                     for(Piece p : movablePieces) {
-                        if(safeSpots.contains(p.currBlock+ch) && p.isAlive)
+                        if(safeSpots.contains(p.currBlock+finalCh) && p.isAlive)
                         {
                             if(p.numberOfSteps>maxprioritytoputinsafeplace) {
                                 maxprioritytoputinsafeplace = p.numberOfSteps;
@@ -1474,7 +1416,6 @@ public class MainActivity extends AppCompatActivity {
                         String colour = players.get(y).getColor();
                         if (!colour.equals(currentPlayerColor)) {
                             List<Piece> enemypieces = getPiecesByColor(colour);
-                            Toast.makeText(MainActivity.this, colour, Toast.LENGTH_SHORT).show();
                             for (Piece tp : enemypieces) {
                                 if (tp.isAlive) {
                                     for (Piece mp : movablePieces) {
@@ -1484,9 +1425,7 @@ public class MainActivity extends AppCompatActivity {
                                             if (safeSpots.contains(mp.currBlock)) {
                                                 safetypoints = 15;
                                             }
-                                            /*if (mp.currBlock == tp.currBlock && safeSpots.contains(mp.currBlock)) {
-                                                if(bestMovablePiece.numberOfSteps<=mp.numberOfSteps) { safetypoints = 15; } else { safetypoints = 9; }
-                                            } else*/ if (mp.currBlock >= 0 && mp.currBlock <= 10 && (tp.currBlock >= 51 - (10 - mp.currBlock))) {
+                                            if (mp.currBlock >= 0 && mp.currBlock <= 10 && (tp.currBlock >= 51 - (10 - mp.currBlock))) {
                                                 if (tp.currBlock >= 51 - (10 - mp.currBlock)) {
                                                     safetypoints -= 10 - mp.currBlock;
                                                 }
@@ -1501,7 +1440,7 @@ public class MainActivity extends AppCompatActivity {
                                                     }
                                                 }
                                             } else if (dangerdiff <= -10) {
-                                                if (dangerdiff + ch <= 0) {
+                                                if (dangerdiff + finalCh <= 0) {
                                                     if (safeSpots.contains(mp.currBlock) && safeSpots.contains(tp.currBlock)) {
                                                         safetypoints = 15;
                                                     } else if (!safeSpots.contains(mp.currBlock) && !safeSpots.contains(tp.currBlock)) {
@@ -1538,10 +1477,10 @@ public class MainActivity extends AppCompatActivity {
                             for (Piece tp : enemypieces) {
                                 if (tp.isAlive && !safeSpots.contains(tp.currBlock)) {
                                     for (Piece mp : movablePieces) {
-                                        if (tp.currBlock == (mp.currBlock+ch)) {
+                                        if (tp.currBlock == (mp.currBlock+finalCh)) {
                                             if (tp.numberOfSteps > bestKillingTargetSteps) {
                                                 bestKillingTargetSteps = tp.numberOfSteps;
-                                                bestMovablePiece = mp;  // should not be commented at deployment stage
+                                                bestMovablePiece = mp;
                                             }
                                         }
                                     }
@@ -1554,16 +1493,15 @@ public class MainActivity extends AppCompatActivity {
                             y++;
                         }
                     }
-                    //Toast.makeText(MainActivity.this, bestMovablePiece.colour+","+bestMovablePiece.startPosition, Toast.LENGTH_SHORT).show();
                     bestMovablePiece.onClickForBot();
                 } else if (chances == 0) {
-                        diceHandler.postDelayed(() -> {
-                            switchPlayers();
-                            isDiceClickable = true;
-                        }, 500);
-                    }
-            }, 350);
-            }
+                    diceHandler.postDelayed(() -> {
+                        switchPlayers();
+                        isDiceClickable = true;
+                    }, 420);
+                }
+            });
+        }
     }
 
     private Drawable getPieceDrawableByColor(String color) {
@@ -1701,10 +1639,11 @@ public class MainActivity extends AppCompatActivity {
 
         globalHandler = new Handler();
 
-        ObjectAnimator animator = ObjectAnimator.ofFloat(hintArrow, "translationX", -20, 20);
+        float arrowBouncePx = 7f * displayMetrics.density;
+        ObjectAnimator animator = ObjectAnimator.ofFloat(hintArrow, "translationX", -arrowBouncePx, arrowBouncePx);
         animator.setRepeatCount(ValueAnimator.INFINITE);
         animator.setRepeatMode(ValueAnimator.REVERSE);
-        animator.setDuration(250);
+        animator.setDuration(260);
         animator.start();
 
 
@@ -1787,22 +1726,40 @@ public class MainActivity extends AppCompatActivity {
         p3exitbox.getLayoutParams().width = (int) (total * 0.985);
         p4exitbox.getLayoutParams().width = (int) (total * 0.985);
 
-        if(gametype!=4) {
-            playername1.getLayoutParams().width = (int) (total);
-            playername1.getLayoutParams().height = (int) (total);
-            playername1.setRotation(90);
-            playername1.setGravity(Gravity.BOTTOM);
-            playername1.setTextAlignment(View.TEXT_ALIGNMENT_CENTER);
-            ((ConstraintLayout.LayoutParams)playername1.getLayoutParams()).topMargin = (int) (30 * displayMetrics.density);
+        // Clean all-player name positioning & visibility across 2P, 3P, 4P, Team-Up, Quick & Bot
+        int topNameMargin = (int) (30 * displayMetrics.density);
+        ((ConstraintLayout.LayoutParams) playername1.getLayoutParams()).topMargin = topNameMargin;
+        ((ConstraintLayout.LayoutParams) playername2.getLayoutParams()).topMargin = topNameMargin;
 
-            playername2.setRotation(180);
-            ((ConstraintLayout.LayoutParams)playername2.getLayoutParams()).topMargin =  (int) (30 * displayMetrics.density);
+        if (gametype != 4) {
+            // Pass 'N Play: top players' names face the opposite side (180°), bottom players upright (0°)
+            playername1.setRotation(180f);
+            playername2.setRotation(180f);
+            playername3.setRotation(0f);
+            playername4.setRotation(0f);
+        } else {
+            // Vs Computer: all names upright for easy reading
+            playername1.setRotation(0f);
+            playername2.setRotation(0f);
+            playername3.setRotation(0f);
+            playername4.setRotation(0f);
+        }
 
-            playername4.getLayoutParams().width = (int) (total);
-            playername4.getLayoutParams().height = (int) (total);
-            playername4.setRotation(-90);
-            playername4.setGravity(Gravity.BOTTOM);
-            playername4.setTextAlignment(View.TEXT_ALIGNMENT_CENTER);
+        if (nop == 2) {
+            playername1.setVisibility(GONE);
+            playername4.setVisibility(GONE);
+            playername2.setVisibility(View.VISIBLE);
+            playername3.setVisibility(View.VISIBLE);
+        } else if (nop == 3) {
+            playername1.setVisibility(View.VISIBLE);
+            playername2.setVisibility(View.VISIBLE);
+            playername3.setVisibility(View.VISIBLE);
+            playername4.setVisibility(GONE);
+        } else {
+            playername1.setVisibility(View.VISIBLE);
+            playername2.setVisibility(View.VISIBLE);
+            playername3.setVisibility(View.VISIBLE);
+            playername4.setVisibility(View.VISIBLE);
         }
 
 
@@ -2380,7 +2337,15 @@ public class MainActivity extends AppCompatActivity {
 
     private void stopEverything() {
         globalHandler.removeCallbacksAndMessages(null);
-        d.diceHandler.removeCallbacksAndMessages(null);
+        if (d != null && d.diceHandler != null) {
+            d.diceHandler.removeCallbacksAndMessages(null);
+        }
+        if (mainDiceImageView != null) {
+            mainDiceImageView.cancelAnimations();
+        }
+        if (activeGlowAnimator != null) {
+            activeGlowAnimator.cancel();
+        }
         if(congratulationSound!=null) {
             if(congratulationSound.isPlaying()) {
                 congratulationSound.stop();
@@ -2395,6 +2360,16 @@ public class MainActivity extends AppCompatActivity {
         if (controllerWatchdog != null) {
             controllerWatchdog.removeCallbacks(controllerWatchdogRunnable);
             controllerWatchdog.removeCallbacks(controllerPingRunnable);
+        }
+        if (mainDiceImageView != null) {
+            mainDiceImageView.cancelAnimations();
+        }
+        if (activeGlowAnimator != null) {
+            activeGlowAnimator.cancel();
+        }
+        if (soundPool != null) {
+            try { soundPool.release(); } catch (Exception ignored) {}
+            soundPool = null;
         }
         // Stop the Wi-Fi discovery beacon; the TCP server keeps running so a
         // Controller can reconnect when the player returns to the board.
@@ -2718,6 +2693,14 @@ public class MainActivity extends AppCompatActivity {
 
         mainDiceImageView = findViewById(R.id.maindiceimageview);
         hintArrow = findViewById(R.id.hintarrowleft);
+        activeDiceGlow = findViewById(R.id.activeDiceGlow);
+        if (activeDiceGlow != null) {
+            activeGlowAnimator = ObjectAnimator.ofFloat(activeDiceGlow, View.ALPHA, 0.55f, 1.0f);
+            activeGlowAnimator.setDuration(600L);
+            activeGlowAnimator.setRepeatCount(ValueAnimator.INFINITE);
+            activeGlowAnimator.setRepeatMode(ValueAnimator.REVERSE);
+            activeGlowAnimator.start();
+        }
 
         crownIndex1 = findViewById(R.id.winnercrownindex1);
         crownIndex2 = findViewById(R.id.winnercrownindex2);
@@ -2858,10 +2841,20 @@ public class MainActivity extends AppCompatActivity {
 
         diceRollSound = MediaPlayer.create(this, R.raw.diceroll);
         stepSound = MediaPlayer.create(this, R.raw.step);
-//        safeSound = MediaPlayer.create(this, R.raw.safe);
-//        deathSound = MediaPlayer.create(this, R.raw.death);
-//        pantaSound = MediaPlayer.create(this, R.raw.panta);
-//        congratulationSound = MediaPlayer.create(this, R.raw.congratulations);
+
+        AudioAttributes audioAttrs = new AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_GAME)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .build();
+        soundPool = new SoundPool.Builder()
+                .setMaxStreams(6)
+                .setAudioAttributes(audioAttrs)
+                .build();
+        spStep = soundPool.load(this, R.raw.step, 1);
+        spDice = soundPool.load(this, R.raw.diceroll, 1);
+        spSafe = soundPool.load(this, R.raw.safe, 1);
+        spDeath = soundPool.load(this, R.raw.death, 1);
+        spPanta = soundPool.load(this, R.raw.panta, 1);
 
         if(isSoundOn) {
             ingamesoundbtn.setImageDrawable(ResourcesCompat.getDrawable(getResources(),R.drawable.soundon,null));
@@ -3003,14 +2996,74 @@ public class MainActivity extends AppCompatActivity {
         dview.setSystemUiVisibility(uiOptions);
     }
 
+    void playStepSound() {
+        if (!isSoundOn) return;
+        if (soundPool != null && spStep != 0) {
+            soundPool.play(spStep, 1f, 1f, 1, 0, 1.05f);
+        } else if (stepSound != null) {
+            try { stepSound.seekTo(120); stepSound.start(); } catch (Exception ignored) {}
+        }
+    }
+
+    void playDiceSound() {
+        if (!isSoundOn) return;
+        if (soundPool != null && spDice != 0) {
+            soundPool.play(spDice, 1f, 1f, 1, 0, 1.0f);
+        } else if (diceRollSound != null) {
+            try { diceRollSound.seekTo(5); diceRollSound.start(); } catch (Exception ignored) {}
+        }
+    }
+
+    void playSafeSound() {
+        if (!isSoundOn) return;
+        if (soundPool != null && spSafe != 0) {
+            soundPool.play(spSafe, 1f, 1f, 1, 0, 1.0f);
+        }
+    }
+
+    void playDeathSound() {
+        if (!isSoundOn) return;
+        if (soundPool != null && spDeath != 0) {
+            soundPool.play(spDeath, 1f, 1f, 1, 0, 1.0f);
+        }
+    }
+
+    void playPantaSound() {
+        if (!isSoundOn) return;
+        if (soundPool != null && spPanta != 0) {
+            soundPool.play(spPanta, 1f, 1f, 1, 0, 1.0f);
+        }
+    }
+
+    void highlightActiveDicePad(int activePadId) {
+        int[] padIds = {R.id.tleftdicebg, R.id.trightdicebg, R.id.bleftdicebg, R.id.brightdicebg};
+        for (int padId : padIds) {
+            View pad = findViewById(padId);
+            if (pad != null) {
+                pad.setAlpha(padId == activePadId ? 1.0f : 0.78f);
+            }
+        }
+        if (activeDiceGlow != null) {
+            ConstraintLayout.LayoutParams glowLps = (ConstraintLayout.LayoutParams) activeDiceGlow.getLayoutParams();
+            glowLps.startToStart = activePadId;
+            glowLps.endToEnd = activePadId;
+            glowLps.topToTop = activePadId;
+            glowLps.bottomToBottom = activePadId;
+            activeDiceGlow.setLayoutParams(glowLps);
+            activeDiceGlow.setVisibility(View.VISIBLE);
+        }
+    }
+
     void moveToTopLeft()
     {
         ConstraintLayout.LayoutParams lps = (ConstraintLayout.LayoutParams) mainDiceImageView.getLayoutParams();
         lps.startToStart = ConstraintLayout.LayoutParams.UNSET;
-        lps.setMarginStart(-((int)displayMetrics.density));
+        lps.setMarginStart(0);
+        lps.setMarginEnd(-((int) (3 * displayMetrics.density)));
         lps.endToEnd = R.id.tleftdicebg;
         lps.bottomToBottom = R.id.tleftdicebg;
         mainDiceImageView.setLayoutParams(lps);
+        highlightActiveDicePad(R.id.tleftdicebg);
         ConstraintLayout.LayoutParams arrowLps = (ConstraintLayout.LayoutParams) hintArrow.getLayoutParams();
         arrowLps.endToStart = ConstraintLayout.LayoutParams.UNSET;
         arrowLps.startToEnd = R.id.tleftdicebg;
@@ -3024,10 +3077,12 @@ public class MainActivity extends AppCompatActivity {
     {
         ConstraintLayout.LayoutParams lps = (ConstraintLayout.LayoutParams) mainDiceImageView.getLayoutParams();
         lps.startToStart = R.id.trightdicebg;
-        lps.setMarginStart(-((int)(2*displayMetrics.density)));
+        lps.setMarginStart(-((int) (3 * displayMetrics.density)));
+        lps.setMarginEnd(0);
         lps.endToEnd = ConstraintLayout.LayoutParams.UNSET;
         lps.bottomToBottom = R.id.trightdicebg;
         mainDiceImageView.setLayoutParams(lps);
+        highlightActiveDicePad(R.id.trightdicebg);
         ConstraintLayout.LayoutParams arrowLps = (ConstraintLayout.LayoutParams) hintArrow.getLayoutParams();
         arrowLps.startToEnd = ConstraintLayout.LayoutParams.UNSET;
         arrowLps.endToStart = R.id.trightdicebg;
@@ -3041,10 +3096,12 @@ public class MainActivity extends AppCompatActivity {
     {
         ConstraintLayout.LayoutParams lps = (ConstraintLayout.LayoutParams) mainDiceImageView.getLayoutParams();
         lps.startToStart = R.id.brightdicebg;
-        lps.setMarginStart(-((int)(2*displayMetrics.density)));
+        lps.setMarginStart(-((int) (3 * displayMetrics.density)));
+        lps.setMarginEnd(0);
         lps.endToEnd = ConstraintLayout.LayoutParams.UNSET;
         lps.bottomToBottom = R.id.brightdicebg;
         mainDiceImageView.setLayoutParams(lps);
+        highlightActiveDicePad(R.id.brightdicebg);
         ConstraintLayout.LayoutParams arrowLps = (ConstraintLayout.LayoutParams) hintArrow.getLayoutParams();
         arrowLps.startToEnd = ConstraintLayout.LayoutParams.UNSET;
         arrowLps.endToStart = R.id.brightdicebg;
@@ -3058,10 +3115,12 @@ public class MainActivity extends AppCompatActivity {
     {
         ConstraintLayout.LayoutParams lps = (ConstraintLayout.LayoutParams) mainDiceImageView.getLayoutParams();
         lps.startToStart = ConstraintLayout.LayoutParams.UNSET;
-        lps.setMarginStart(-((int)displayMetrics.density));
+        lps.setMarginStart(0);
+        lps.setMarginEnd(-((int) (3 * displayMetrics.density)));
         lps.endToEnd = R.id.bleftdicebg;
         lps.bottomToBottom = R.id.bleftdicebg;
         mainDiceImageView.setLayoutParams(lps);
+        highlightActiveDicePad(R.id.bleftdicebg);
         ConstraintLayout.LayoutParams arrowLps = (ConstraintLayout.LayoutParams) hintArrow.getLayoutParams();
         arrowLps.endToStart = ConstraintLayout.LayoutParams.UNSET;
         arrowLps.startToEnd = R.id.bleftdicebg;

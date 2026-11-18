@@ -4,9 +4,10 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/activitybg"
     android:layout_width="match_parent"
-
     android:layout_height="match_parent"
     android:background="@drawable/backgroundmaze"
+    android:clipChildren="false"
+    android:clipToPadding="false"
     tools:context=".MainActivity">
 
     <RelativeLayout
@@ -1067,14 +1068,28 @@
         app:layout_constraintTop_toTopOf="parent"
         app:srcCompat="@drawable/gamestarticon" />
 
-    <ImageView
-        android:id="@+id/maindiceimageview"
-        android:layout_width="74dp"
-        android:layout_height="85dp"
-        android:layout_marginBottom="5dp"
+    <View
+        android:id="@+id/activeDiceGlow"
+        android:layout_width="121dp"
+        android:layout_height="68dp"
+        android:background="@drawable/dice_pad_active_glow"
+        android:elevation="6dp"
+        android:visibility="gone"
         app:layout_constraintBottom_toBottomOf="@+id/bleftdicebg"
         app:layout_constraintEnd_toEndOf="@+id/bleftdicebg"
-        app:srcCompat="@drawable/dice1" />
+        app:layout_constraintStart_toStartOf="@+id/bleftdicebg"
+        app:layout_constraintTop_toTopOf="@+id/bleftdicebg" />
+
+    <app.ludo.diwas.ui.Dice3DView
+        android:id="@+id/maindiceimageview"
+        android:layout_width="76dp"
+        android:layout_height="124dp"
+        android:layout_marginEnd="-3dp"
+        android:clickable="true"
+        android:elevation="24dp"
+        android:focusable="true"
+        app:layout_constraintBottom_toBottomOf="@+id/bleftdicebg"
+        app:layout_constraintEnd_toEndOf="@+id/bleftdicebg" />
 
     <ImageView
         android:id="@+id/ingamemenubtn"

@@ -864,8 +864,8 @@ public class HomeActivity extends AppCompatActivity implements View.OnClickListe
                     i.putExtra("type", pnpgametype);
                     i.putExtra("nop",2);
                     i.putExtra("color",colour); // in case of 2 players it is main color of 3rd section.
-                    i.putExtra("player3name",p2l1player1name.getText().toString());
-                    i.putExtra("player2name",p2l1player2name.getText().toString());
+                    i.putExtra("player3name", (isP2L1True ? p2l1player1name : p2l2player1name).getText().toString());
+                    i.putExtra("player2name", (isP2L1True ? p2l1player2name : p2l2player2name).getText().toString());
                     i.putExtra("normalPiece",tokenNormal);
                     startActivity(i);
                     overridePendingTransition(0,0);
